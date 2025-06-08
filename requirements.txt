@@ -1,2 +1,9 @@
 gradio
 requests
+langgraph
+langchain
+langchain-google-genai
+pandas
+tabulate
+python-dotenv
+google-generativeai
