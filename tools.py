@@ -16,7 +16,7 @@ import numpy as np
 class EnhancedSearchTool:
     """Enhanced web search with intelligent query processing and result filtering"""
     
-    def __init__(self, max_results: int = 10):
+    def __init__(self, max_results: int = 1):
         self.base_tool = DuckDuckGoSearchResults(num_results=max_results)
         self.max_results = max_results
         
@@ -155,7 +155,7 @@ class EnhancedWikipediaTool:
     
     def __init__(self):
         self.base_wrapper = WikipediaAPIWrapper(
-            top_k_results=5,
+            top_k_results=1,
             doc_content_chars_max=3000,
             load_all_available_meta=True
         )
