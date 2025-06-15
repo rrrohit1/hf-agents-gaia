@@ -2,26 +2,25 @@ import os
 import re
 from pathlib import Path
 from typing import Optional, Union, Dict, List, Any
-from dataclasses import dataclass
 from enum import Enum
 import requests
 import tempfile
 
-import pandas as pd
 from dotenv import load_dotenv
-from tabulate import tabulate
-
 from langgraph.graph import StateGraph, END
 from langchain.tools import Tool as LangTool
-from langchain.tools import DuckDuckGoSearchResults, WikipediaQueryRun
-from langchain.utilities import WikipediaAPIWrapper
 from langchain_core.runnables import RunnableLambda
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.schema import AIMessage, HumanMessage
-
-import whisper
 from pathlib import Path
-from PIL import Image
+
+
+from tools import (
+    EnhancedSearchTool,
+    EnhancedWikipediaTool,
+    excel_to_markdown,
+    image_file_info,
+    audio_file_info,
+    code_file_read)
 
 # Load environment variables
 load_dotenv()
@@ -76,104 +75,50 @@ def initialize_state(question: str) -> AgentState:
         "max_errors": 3
     }
 
-# ----------- Enhanced Tools -----------
-def excel_to_markdown(excel_path: str, sheet_name: Optional[str] = None) -> str:
-    """Enhanced Excel tool with better error handling"""
-    try:
-        file_path = Path(excel_path).expanduser().resolve()
-        if not file_path.is_file():
-            return f"Error: Excel file not found at {file_path}"
-
-        sheet: Union[str, int] = (
-            int(sheet_name) if sheet_name and sheet_name.isdigit() else sheet_name or 0
-        )
-        df = pd.read_excel(file_path, sheet_name=sheet)
-        
-        # Add metadata about the dataframe
-        metadata = f"Dataset Info: {len(df)} rows, {len(df.columns)} columns\n"
-        metadata += f"Columns: {', '.join(df.columns.tolist())}\n\n"
-        
-        if hasattr(df, "to_markdown"):
-            return metadata + df.head(10).to_markdown(index=False) + f"\n\n(Showing first 10 rows of {len(df)})"
-        return metadata + tabulate(df.head(10), headers="keys", tablefmt="github", showindex=False)
-    except Exception as e:
-        return f"Error reading Excel file: {str(e)}"
-
-def image_file_info(image_path: str) -> str:
-    try:
-        img = Image.open(image_path)
-        return f"Image file info: format={img.format}, size={img.size}, mode={img.mode}"
-    except Exception as e:
-        return f"Error reading image: {e}"
-
-def audio_file_info(audio_path: str) -> str:
-
-    try:
-        model = whisper.load_model("turbo")  # or "small", "medium", "large"
-        result = model.transcribe(audio_path)
-        return f"Audio file transcription: {result}"
-    except Exception as e:
-        return f"Error transcribing MP3: {str(e)}"
-    # Placeholder - you could add actual audio metadata reading
 
 
-def code_file_read(code_path: str) -> str:
-    try:
-        with open(code_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return content
-    except Exception as e:
-        return f"Error reading code file: {e}"
+# Initialize enhanced tools
+enhanced_search_tool = LangTool.from_function(
+    name="enhanced_web_search",
+    func=EnhancedSearchTool().run,
+    description="Enhanced web search with intelligent query processing, multiple search strategies, and result filtering. Provides comprehensive and relevant search results."
+)
 
+enhanced_wiki_tool = LangTool.from_function(
+    name="enhanced_wikipedia",
+    func=EnhancedWikipediaTool().run,
+    description="Enhanced Wikipedia search with entity extraction, multi-term search, and relevant content filtering. Provides detailed encyclopedic information."
+)
 
-def extract_file_path(question: str) -> Optional[str]:
-    """Extract file path from question using regex"""
-    patterns = [
-        r"file\s+(?:at\s+)?['\"]?([^'\">\s]+\.xlsx?)['\"]?",
-        r"excel\s+(?:file\s+)?['\"]?([^'\">\s]+\.xlsx?)['\"]?",
-        r"['\"]?([^'\">\s]*\.xlsx?)['\"]?",
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, question, re.IGNORECASE)
-        if match:
-            return match.group(1)
-    return None
-
-# Initialize tools
 excel_tool = LangTool.from_function(
     name="excel_to_text",
     func=excel_to_markdown,
-    description="Reads an Excel file and returns a Markdown table with metadata. Inputs: 'excel_path' (str), 'sheet_name' (str, optional).",
+    description="Enhanced Excel analysis with metadata, statistics, and structured data preview. Inputs: 'excel_path' (str), 'sheet_name' (str, optional).",
 )
 
 image_tool = LangTool.from_function(
     name="image_file_info",
     func=image_file_info,
-    description="Reads an image file and returns its metadata."
+    description="Enhanced image file analysis with detailed metadata and properties."
 )
 
 audio_tool = LangTool.from_function(
     name="audio_file_info",
     func=audio_file_info,
-    description="Processes an audio file and returns transcription."
+    description="Enhanced audio processing with transcription, language detection, and timestamped segments."
 )
 
 code_tool = LangTool.from_function(
     name="code_file_read",
     func=code_file_read,
-    description="Reads a code file and returns the code as a string file."
+    description="Enhanced code file analysis with language-specific insights and structure analysis."
 )
 
-
-duckduckgo_tool = DuckDuckGoSearchResults(num_results=5)
-wiki_tool = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
-
-# Tool registry
+# Enhanced tool registry
 AVAILABLE_TOOLS = {
     "excel": excel_tool,
-    "search": duckduckgo_tool,
-    "wikipedia": wiki_tool,
+    "search": enhanced_search_tool,
+    "wikipedia": enhanced_wiki_tool,
     "image": image_tool,
     "audio": audio_tool,
     "code": code_tool,
@@ -181,28 +126,32 @@ AVAILABLE_TOOLS = {
 
 # ----------- Intelligent Tool Selection -----------
 def analyze_question(state: AgentState) -> AgentState:
-    """Analyze the question and determine context"""
-    question = state["question"].lower()
-    
-    # Use LLM to analyze the question
+    """Enhanced question analysis with better tool recommendation"""
     analysis_prompt = f"""
-    Analyze this question and determine what tools might be needed:
+    Analyze this question and determine the best tools and approach:
     Question: {state["question"]}
     
-    Available tools:
-    1. excel - for reading Excel/CSV files
-    2. search - for web search queries
-    3. wikipedia - for encyclopedic information
-    4. image - for generating or analyzing images
-    5. audio - for audio transcription or processing (e.g., transcribing mp3, extracting audio from video)
-    6. code - for reading, summarizing, or executing code
-
-    Respond with:
-    1. Primary intent (data_analysis, information_search, general_knowledge, audio_transcription, video_analysis)
-    2. Suggested tools (comma-separated list)
-    3. Key entities or file paths mentioned
+    Available enhanced tools:
+    1. excel - Enhanced Excel/CSV analysis with statistics and metadata
+    2. search - Enhanced web search with intelligent query processing and result filtering
+    3. wikipedia - Enhanced Wikipedia search with entity extraction and content filtering
+    4. image - Enhanced image analysis with detailed metadata
+    5. audio - Enhanced audio processing with transcription and language detection
+    6. code - Enhanced code analysis with language-specific insights
     
-    Format: INTENT: <intent> | TOOLS: <tools> | ENTITIES: <entities>
+    Consider:
+    - Question type (factual, analytical, current events, technical)
+    - Required information sources (files, web, encyclopedic)
+    - Time sensitivity (current vs historical information)
+    - Complexity level
+    
+    Respond with:
+    1. Question type: <type>
+    2. Primary tools needed: <tools>
+    3. Search strategy: <strategy>
+    4. Expected answer format: <format>
+    
+    Format: TYPE: <type> | TOOLS: <tools> | STRATEGY: <strategy> | FORMAT: <format>
     """
     
     try:
@@ -217,94 +166,121 @@ def analyze_question(state: AgentState) -> AgentState:
     return state
 
 def select_tools(state: AgentState) -> AgentState:
+    """Enhanced tool selection with smarter logic"""
     question = state["question"].lower()
     selected_tools = []
 
-    if any(keyword in question for keyword in ["excel", "csv", "spreadsheet", ".xlsx"]):
+    # File-based tool selection
+    if any(keyword in question for keyword in ["excel", "csv", "spreadsheet", ".xlsx", ".xls"]):
         selected_tools.append("excel")
-    if any(keyword in question for keyword in ["search", "find", "look up", "current", "recent", "news"]):
-        selected_tools.append("search")
-    if any(keyword in question for keyword in ["wikipedia", "history", "definition", "who is"]):
-        selected_tools.append("wikipedia")
-    if any(keyword in question for keyword in [".png", ".jpg", ".jpeg", ".bmp", ".gif"]):
+    if any(keyword in question for keyword in [".png", ".jpg", ".jpeg", ".bmp", ".gif", "image"]):
         selected_tools.append("image")
-    if any(keyword in question for keyword in [".mp3", ".wav", ".ogg"]):
+    if any(keyword in question for keyword in [".mp3", ".wav", ".ogg", "audio", "transcribe"]):
         selected_tools.append("audio")
-    if any(keyword in question for keyword in [".py", ".ipynb"]):
+    if any(keyword in question for keyword in [".py", ".ipynb", "code", "script", "function"]):
         selected_tools.append("code")
 
+    # Information-based tool selection
+    current_indicators = ["latest", "recent", "current", "news", "today", "2024", "2025", "now"]
+    encyclopedia_indicators = ["history", "definition", "biography", "overview", "background"]
+    
+    if any(indicator in question for indicator in current_indicators):
+        selected_tools.append("search")
+    elif any(indicator in question for indicator in encyclopedia_indicators):
+        selected_tools.append("wikipedia")
+    elif any(keyword in question for keyword in ["search", "find", "look up", "information about"]):
+        # Use both for comprehensive coverage
+        selected_tools.extend(["search", "wikipedia"])
+
+    # Default fallback
     if not selected_tools:
+        if any(word in question for word in ["who", "what", "when", "where"]):
+            selected_tools.append("wikipedia")
         selected_tools.append("search")
 
+    # Remove duplicates while preserving order
+    selected_tools = list(dict.fromkeys(selected_tools))
+    
     state["selected_tools"] = selected_tools
     state["current_step"] = AgentStep.EXECUTE_TOOLS.value
     return state
 
-
 def execute_tools(state: AgentState) -> AgentState:
+    """Enhanced tool execution with better error handling"""
     results = {}
 
-    # Check if downloaded file info is appended in question text
+    # Enhanced file detection
     file_path = None
     downloaded_file_marker = "A file was downloaded for this task and saved locally at:"
     if downloaded_file_marker in state["question"]:
-        # Extract file path from question text
         lines = state["question"].splitlines()
         for i, line in enumerate(lines):
             if downloaded_file_marker in line:
-                # The file path should be on the next line
                 if i + 1 < len(lines):
                     file_path_candidate = lines[i + 1].strip()
                     if Path(file_path_candidate).exists():
                         file_path = file_path_candidate
+                        print(f"Detected file path: {file_path}")
                 break
 
     for tool_name in state["selected_tools"]:
         try:
-            if tool_name == "excel" and file_path:
-                # Run excel tool on detected file path
-                result = AVAILABLE_TOOLS["excel"].run({"excel_path": file_path, "sheet_name": None})
-            elif tool_name == "image" and file_path:
-                result = AVAILABLE_TOOLS["image_file_info"].run(file_path)
-            elif tool_name == "audio" and file_path:
-                result = AVAILABLE_TOOLS["audio_file_info"].run(file_path)
-            elif tool_name == "code" and file_path:
-                result = AVAILABLE_TOOLS["code_file_preview"].run(file_path)
+            print(f"Executing tool: {tool_name}")
+            
+            # File-based tools
+            if tool_name in ["excel", "image", "audio", "code"] and file_path:
+                if tool_name == "excel":
+                    result = AVAILABLE_TOOLS["excel"].run({"excel_path": file_path, "sheet_name": None})
+                else:
+                    result = AVAILABLE_TOOLS[tool_name].run(file_path)
+            # Information-based tools
             else:
-                result = AVAILABLE_TOOLS[tool_name].run(state["question"])
+                # Extract clean query for search tools
+                clean_query = state["question"]
+                if downloaded_file_marker in clean_query:
+                    clean_query = clean_query.split(downloaded_file_marker)[0].strip()
+                
+                result = AVAILABLE_TOOLS[tool_name].run(clean_query)
 
             results[tool_name] = result
+            print(f"Tool {tool_name} completed successfully")
+            
         except Exception as e:
-            results[tool_name] = f"Error using {tool_name}: {str(e)}"
+            error_msg = f"Error using {tool_name}: {str(e)}"
+            results[tool_name] = error_msg
             state["error_count"] += 1
+            print(error_msg)
 
     state["tool_results"] = results
     state["current_step"] = AgentStep.SYNTHESIZE_ANSWER.value
     return state
 
-
 def synthesize_answer(state: AgentState) -> AgentState:
-    """Synthesize final answer from tool results"""
+    """Enhanced answer synthesis with better formatting"""
     if not state["tool_results"]:
         state["final_answer"] = "I couldn't find any relevant information to answer your question."
         state["current_step"] = AgentStep.COMPLETE.value
         return state
     
-    # Create synthesis prompt
-    synthesis_prompt = f"""You are given a factual question and some tool results to help answer it.
+    # Enhanced synthesis prompt
+    tool_results_str = "\n".join([f"=== {tool.upper()} RESULTS ===\n{result}\n" for tool, result in state["tool_results"].items()])
+
+    synthesis_prompt = f"""You are an assistant providing exact factual answers based only on the tool outputs.
 
         Question: {state["question"]}
 
-        Use ONLY the information in the tool results below to generate the answer.
+        Available information:
+        {tool_results_str}
 
-        Output Requirements:
-        - Your answer MUST be complete, precise, and follow the output format required by the question.
-        - DO NOT include explanations, introductions, or reasoning.
-        - Respond with only the answer.
+        Instructions:
+        - Answer the question as precisely and factually as possible.
+        - Only include information found in the tool outputs.
+        - Do not infer or elaborate beyond the original question.
+        - If the question asks for a number, name, date, or list, give only that.
+        - If the answer is not found in the tool results, say "Not found in provided data."
+        - No leading or trailing spaces or punctuations(unless mentioned in the question), just the answer.
 
-        Tool Results:
-        {chr(10).join([f"{tool}: {result}" for tool, result in state["tool_results"].items()])}
-        """
+        Answer:"""
         
     try:
         response = llm.invoke(synthesis_prompt).content
@@ -318,18 +294,25 @@ def synthesize_answer(state: AgentState) -> AgentState:
     return state
 
 def error_recovery(state: AgentState) -> AgentState:
-    """Handle errors and attempt recovery"""
+    """Enhanced error recovery with multiple fallback strategies"""
     if state["error_count"] >= state["max_errors"]:
-        state["final_answer"] = "I encountered too many errors and cannot complete this task."
+        state["final_answer"] = "I encountered multiple errors and cannot complete this task reliably."
         state["current_step"] = AgentStep.COMPLETE.value
     else:
-        # Try with a simpler approach - direct LLM response
+        # Enhanced fallback: try with simplified approach
         try:
-            response = llm.invoke(state["question"]).content
-            state["final_answer"] = f"Using direct reasoning: {response}"
+            fallback_prompt = f"""
+            Answer this question directly using your knowledge:
+            {state["original_question"]}
+            
+            Provide a helpful response even if you cannot access external tools.
+            Be clear about any limitations in your answer.
+            """
+            response = llm.invoke(fallback_prompt).content
+            state["final_answer"] = f"Using available knowledge (some tools unavailable): {response}"
             state["current_step"] = AgentStep.COMPLETE.value
         except Exception as e:
-            state["final_answer"] = f"All approaches failed: {e}"
+            state["final_answer"] = f"All approaches failed. Error: {e}"
             state["current_step"] = AgentStep.COMPLETE.value
     
     return state
@@ -349,7 +332,7 @@ def route_next_step(state: AgentState) -> str:
     
     return step_routing.get(state["current_step"], END)
 
-# Create workflow
+# Create enhanced workflow
 workflow = StateGraph(AgentState)
 
 # Add nodes
@@ -378,106 +361,225 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("error_recovery", END)
 
-# Compile the graph
+# Compile the enhanced graph
 graph = workflow.compile()
 
 # ----------- Enhanced Agent Class -----------
 class GaiaAgent:
+    """GAIA Agent with tools and intelligent processing"""
+    
     def __init__(self):
         self.graph = graph
-        print("Enhanced GaiaAgent initialized with multi-step reasoning and error recovery.")
+        self.tool_usage_stats = {}
+        print("Enhanced GAIA Agent initialized with:")
+        print("✓ Intelligent multi-query web search")
+        print("✓ Entity-aware Wikipedia search")
+        print("✓ Enhanced file processing tools")
+        print("✓ Advanced error recovery")
+        print("✓ Comprehensive result synthesis")
+
+    def get_tool_stats(self) -> Dict[str, int]:
+        """Get usage statistics for tools"""
+        return self.tool_usage_stats.copy()
 
     def __call__(self, task_id: str, question: str) -> str:
-        print(f"[{task_id}] Processing: {question}")
+        print(f"\n{'='*60}")
+        print(f"[{task_id}] ENHANCED PROCESSING: {question[:100]}...")
         
-        # Initialize state using our helper function
-        question = process_file(task_id, question)
-        initial_state = initialize_state(question)
+        # Initialize state
+        processed_question = process_file(task_id, question)
+        initial_state = initialize_state(processed_question)
         
         try:
-            # Execute the workflow
+            # Execute the enhanced workflow
             result = self.graph.invoke(initial_state)
             
-            # Extract information from the result dictionary
+            # Extract results
             answer = result.get("final_answer", "No answer generated")
             selected_tools = result.get("selected_tools", [])
             conversation_history = result.get("conversation_history", [])
+            tool_results = result.get("tool_results", {})
+            error_count = result.get("error_count", 0)
             
+            # Update tool usage statistics
+            for tool in selected_tools:
+                self.tool_usage_stats[tool] = self.tool_usage_stats.get(tool, 0) + 1
+            
+            # Enhanced logging
             print(f"[{task_id}] Selected tools: {selected_tools}")
-            print(f"[{task_id}] Steps taken: {len(conversation_history)}")
-            print(f"[{task_id}] Final answer: {answer}")
+            print(f"[{task_id}] Tools executed: {list(tool_results.keys())}")
+            print(f"[{task_id}] Processing steps: {len(conversation_history)}")
+            print(f"[{task_id}] Errors encountered: {error_count}")
+            
+            # Log tool result sizes for debugging
+            for tool, result in tool_results.items():
+                result_size = len(str(result)) if result else 0
+                print(f"[{task_id}] {tool} result size: {result_size} chars")
+            
+            print(f"[{task_id}] FINAL ANSWER: {answer[:200]}...")
+            print(f"{'='*60}")
             
             return answer
             
         except Exception as e:
-            error_msg = f"Critical error in agent execution: {str(e)}"
+            error_msg = f"Critical error in enhanced agent execution: {str(e)}"
             print(f"[{task_id}] {error_msg}")
-            return error_msg
-        
-def detect_file_type(file_path: str) -> Optional[str]:
-    """Detect file type by file extension."""
-    ext = Path(file_path).suffix.lower()
-    if ext in [".xlsx", ".xls"]:
-        return "excel"
-    elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif"]:
-        return "image"
-    elif ext in [".mp3", ".wav", ".ogg"]:
-        return "audio"
-    elif ext in [".py", ".ipynb"]:
-        return "code"
-    else:
-        return None
+            
+            # Try fallback direct LLM response
+            try:
+                fallback_response = llm.invoke(f"Please answer this question: {question}").content
+                return f"Fallback response: {fallback_response}"
+            except:
+                return error_msg
 
+# ----------- Enhanced File Processing -----------
+def detect_file_type(file_path: str) -> Optional[str]:
+    """Enhanced file type detection with more formats"""
+    ext = Path(file_path).suffix.lower()
+    
+    file_type_mapping = {
+        # Spreadsheets
+        '.xlsx': 'excel', '.xls': 'excel', '.csv': 'excel',
+        # Images
+        '.png': 'image', '.jpg': 'image', '.jpeg': 'image', 
+        '.bmp': 'image', '.gif': 'image', '.tiff': 'image', '.webp': 'image',
+        # Audio
+        '.mp3': 'audio', '.wav': 'audio', '.ogg': 'audio', 
+        '.flac': 'audio', '.m4a': 'audio', '.aac': 'audio',
+        # Code
+        '.py': 'code', '.ipynb': 'code', '.js': 'code', '.html': 'code',
+        '.css': 'code', '.java': 'code', '.cpp': 'code', '.c': 'code',
+        '.sql': 'code', '.r': 'code', '.json': 'code', '.xml': 'code',
+        # Documents
+        '.txt': 'text', '.md': 'text', '.pdf': 'document',
+        '.doc': 'document', '.docx': 'document'
+    }
+    
+    return file_type_mapping.get(ext)
 
 def process_file(task_id: str, question_text: str) -> str:
-    """
-    Attempt to download a file associated with a task from the API.
-    - If the file exists (HTTP 200), it is saved to a temp directory and the local file path is returned.
-    - If no file is found (HTTP 404), returns None.
-    - For all other HTTP errors, the exception is propagated to the caller.
-    """
+    """Enhanced file processing with better error handling and metadata"""
     file_url = f"{FILE_PATH}{task_id}"
-
+    
     try:
+        print(f"[{task_id}] Attempting to download file from: {file_url}")
         response = requests.get(file_url, timeout=30)
         response.raise_for_status()
+        print(f"[{task_id}] File download successful. Status: {response.status_code}")
+        
     except requests.exceptions.RequestException as exc:
-        print(f"Exception in download_file>> {str(exc)}")
-        return question_text # Unable to get the file
-
-    # Determine filename from 'Content-Disposition' header, fallback to task_id
+        print(f"[{task_id}] File download failed: {str(exc)}")
+        return question_text  # Return original question if no file
+    
+    # Enhanced filename extraction
     content_disposition = response.headers.get("content-disposition", "")
-    filename = task_id
-    match = re.search(r'filename="([^"]+)"', content_disposition)
-    if match:
-        filename = match.group(1)
-
-    # Save file in a temp directory
-    temp_storage_dir = Path(tempfile.gettempdir()) / "gaia_cached_files"
+    filename = task_id  # Default fallback
+    
+    # Try to extract filename from Content-Disposition header
+    filename_match = re.search(r'filename[*]?=(?:"([^"]+)"|([^;]+))', content_disposition)
+    if filename_match:
+        filename = filename_match.group(1) or filename_match.group(2)
+        filename = filename.strip()
+    
+    # Create enhanced temp directory structure
+    temp_storage_dir = Path(tempfile.gettempdir()) / "gaia_enhanced_files" / task_id
     temp_storage_dir.mkdir(parents=True, exist_ok=True)
-
+    
     file_path = temp_storage_dir / filename
     file_path.write_bytes(response.content)
-    return (
-                f"{question_text}\n\n"
-                f"---\n"
-                f"A file was downloaded for this task and saved locally at:\n"
-                f"{str(file_path)}\n"
-                f"---\n\n"
-            )
+    
+    # Get file metadata
+    file_size = len(response.content)
+    file_type = detect_file_type(filename)
+    
+    print(f"[{task_id}] File saved: {filename} ({file_size:,} bytes, type: {file_type})")
+    
+    # Enhanced question augmentation
+    enhanced_question = f"{question_text}\n\n"
+    enhanced_question += f"{'='*50}\n"
+    enhanced_question += f"FILE INFORMATION:\n"
+    enhanced_question += f"A file was downloaded for this task and saved locally at:\n"
+    enhanced_question += f"{str(file_path)}\n"
+    enhanced_question += f"File details:\n"
+    enhanced_question += f"- Name: {filename}\n"
+    enhanced_question += f"- Size: {file_size:,} bytes ({file_size/1024:.1f} KB)\n"
+    enhanced_question += f"- Type: {file_type or 'unknown'}\n"
+    enhanced_question += f"{'='*50}\n\n"
+    
+    return enhanced_question
+
+# ----------- Usage Examples and Testing -----------
+def run_enhanced_tests():
+    """Run comprehensive tests of the enhanced agent"""
+    agent = GaiaAgent()
+    
+    test_cases = [
+        {
+            "id": "test_search_1",
+            "question": "What are the latest developments in artificial intelligence in 2024?",
+            "expected_tools": ["search"]
+        },
+        {
+            "id": "test_wiki_1", 
+            "question": "Tell me about Albert Einstein's contributions to physics",
+            "expected_tools": ["wikipedia"]
+        },
+        {
+            "id": "test_combined_1",
+            "question": "What is machine learning and what are recent breakthroughs?",
+            "expected_tools": ["wikipedia", "search"]
+        },
+        {
+            "id": "test_excel_1",
+            "question": "Analyze the data in the Excel file sales_data.xlsx",
+            "expected_tools": ["excel"]
+        }
+    ]
+    
+    print("\n" + "="*80)
+    print("RUNNING ENHANCED AGENT TESTS")
+    print("="*80)
+    
+    for test_case in test_cases:
+        print(f"\nTest Case: {test_case['id']}")
+        print(f"Question: {test_case['question']}")
+        print(f"Expected tools: {test_case['expected_tools']}")
+        
+        try:
+            result = agent(test_case['id'], test_case['question'])
+            print(f"Result length: {len(result)} characters")
+            print(f"Result preview: {result[:200]}...")
+        except Exception as e:
+            print(f"Test failed: {e}")
+        
+        print("-" * 60)
+    
+    # Print tool usage statistics
+    print(f"\nTool Usage Statistics:")
+    for tool, count in agent.get_tool_stats().items():
+        print(f"  {tool}: {count} times")
 
 # Usage example
 if __name__ == "__main__":
-    agent = GaiaAgent()
+    # Create enhanced agent
+    agent = EnhancedGaiaAgent()
     
-    # Test questions
-    test_questions = [
-        "What information is in the Excel file data.xlsx?",
-        "Search for recent news about artificial intelligence",
-        "Tell me about the history of machine learning",
+    # Example usage
+    sample_questions = [
+        "What is the current population of Tokyo and how has it changed recently?",
+        "Explain quantum computing and its recent developments",
+        "Tell me about the history of machine learning and current AI trends",
     ]
     
-    for i, question in enumerate(test_questions):
-        print(f"\n{'='*50}")
-        result = agent(f"test_{i}", question)
-        print(f"Result: {result}")
+    print("\n" + "="*80)
+    print("ENHANCED GAIA AGENT DEMONSTRATION")
+    print("="*80)
+    
+    for i, question in enumerate(sample_questions):
+        print(f"\nExample {i+1}: {question}")
+        result = agent(f"demo_{i}", question)
+        print(f"Answer: {result[:300]}...")
+        print("-" * 60)
+    
+    # Uncomment to run comprehensive tests
+    # run_enhanced_tests()

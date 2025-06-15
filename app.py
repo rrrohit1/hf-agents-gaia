@@ -11,7 +11,6 @@ import time
 DEFAULT_API_URL = "https://agents-course-unit4-scoring.hf.space"
 
 # --- Basic Agent Definition ---
-# ----- THIS IS WERE YOU CAN BUILD WHAT YOU WANT ------
 class BasicAgent:
     def __init__(self):
         print("BasicAgent initialized.")
@@ -88,7 +87,7 @@ def run_and_submit_all( profile: gr.OAuthProfile | None):
         except Exception as e:
              print(f"Error running agent on task {task_id}: {e}")
              results_log.append({"Task ID": task_id, "Question": question_text, "Submitted Answer": f"AGENT ERROR: {e}"})
-        time.sleep(5)  # Add a 5-second delay between each call
+        time.sleep(2)  # Add a 2-second delay between each call
 
     if not answers_payload:
         print("Agent did not produce any answers to submit.")
