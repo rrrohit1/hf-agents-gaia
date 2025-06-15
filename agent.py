@@ -231,6 +231,8 @@ def execute_tools(state: AgentState) -> AgentState:
             if tool_name in ["excel", "image", "audio", "code"] and file_path:
                 if tool_name == "excel":
                     result = AVAILABLE_TOOLS["excel"].run({"excel_path": file_path, "sheet_name": None})
+                elif tool_name == "image":
+                    result = AVAILABLE_TOOLS["image"].run({"image_path": file_path, "question": state["question"], "llm": llm})
                 else:
                     result = AVAILABLE_TOOLS[tool_name].run(file_path)
             # Information-based tools
@@ -265,22 +267,24 @@ def synthesize_answer(state: AgentState) -> AgentState:
     # Enhanced synthesis prompt
     tool_results_str = "\n".join([f"=== {tool.upper()} RESULTS ===\n{result}\n" for tool, result in state["tool_results"].items()])
 
-    synthesis_prompt = f"""You are an assistant providing exact factual answers based only on the tool outputs.
+    synthesis_prompt = f"""You are a precise assistant tasked with answering the user's question using available tool outputs.
 
-        Question: {state["question"]}
+    Question:
+    {state["question"]}
 
-        Available information:
-        {tool_results_str}
+    Available information:
+    {tool_results_str}
 
-        Instructions:
-        - Answer the question as precisely and factually as possible.
-        - Only include information found in the tool outputs.
-        - Do not infer or elaborate beyond the original question.
-        - If the question asks for a number, name, date, or list, give only that.
-        - If the answer is not found in the tool results, say "Not found in provided data."
-        - No leading or trailing spaces or punctuations(unless mentioned in the question), just the answer.
+    Instructions:
+    - Think step-by-step using information from the tool results and the question itself.
+    - If the answer is directly stated, extract it.
+    - If not, reason internally to derive the answer using facts, dates, or counts present in the data.
+    - Only use factual logic. Do not invent or assume anything not supported by the tools or question.
+    - If no answer can be found or inferred, return "NA".
+    - Output only the final answer — no reasoning, no explanation.
+    - Do not add any leading/trailing spaces or punctuation unless explicitly required by the question.
 
-        Answer:"""
+    Final answer:"""
         
     try:
         response = llm.invoke(synthesis_prompt).content
@@ -364,7 +368,7 @@ workflow.add_edge("error_recovery", END)
 # Compile the enhanced graph
 graph = workflow.compile()
 
-# ----------- Enhanced Agent Class -----------
+# ----------- Agent Class -----------
 class GaiaAgent:
     """GAIA Agent with tools and intelligent processing"""
     
@@ -384,7 +388,7 @@ class GaiaAgent:
 
     def __call__(self, task_id: str, question: str) -> str:
         print(f"\n{'='*60}")
-        print(f"[{task_id}] ENHANCED PROCESSING: {question[:100]}...")
+        print(f"[{task_id}] ENHANCED PROCESSING: {question}")
         
         # Initialize state
         processed_question = process_file(task_id, question)
@@ -416,7 +420,7 @@ class GaiaAgent:
                 result_size = len(str(result)) if result else 0
                 print(f"[{task_id}] {tool} result size: {result_size} chars")
             
-            print(f"[{task_id}] FINAL ANSWER: {answer[:200]}...")
+            print(f"[{task_id}] FINAL ANSWER: {answer}")
             print(f"{'='*60}")
             
             return answer
@@ -562,7 +566,7 @@ def run_enhanced_tests():
 # Usage example
 if __name__ == "__main__":
     # Create enhanced agent
-    agent = EnhancedGaiaAgent()
+    agent = GaiaAgent()
     
     # Example usage
     sample_questions = [

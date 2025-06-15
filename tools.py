@@ -325,29 +325,21 @@ def excel_to_markdown(excel_path: str, sheet_name: Optional[str] = None) -> str:
     except Exception as e:
         return f"Error reading Excel file: {str(e)}"
 
-def image_file_info(image_path: str) -> str:
-    """Enhanced image analysis"""
+def image_file_info(image_path: str, question: str, llm) -> str:
     try:
-        img = Image.open(image_path)
-        
-        info = f"IMAGE FILE ANALYSIS:\n"
-        info += f"File: {Path(image_path).name}\n"
-        info += f"Format: {img.format}\n"
-        info += f"Dimensions: {img.size[0]} × {img.size[1]} pixels\n"
-        info += f"Color mode: {img.mode}\n"
-        
-        # Additional image properties
-        if hasattr(img, 'info') and img.info:
-            info += f"Metadata: {dict(list(img.info.items())[:5])}\n"  # First 5 metadata items
-        
-        # File size
-        file_size = Path(image_path).stat().st_size
-        info += f"File size: {file_size:,} bytes ({file_size/1024:.1f} KB)\n"
-        
-        return info
-        
+        with open(image_path, "rb") as img_file:
+            image_data = img_file.read()
+
+        inputs = [
+            question,
+            {"mime_type": "image/jpeg", "data": image_data}
+        ]
+
+        response = llm.invoke(inputs)
+        return response.content.strip()
+    
     except Exception as e:
-        return f"Error reading image: {e}"
+        return f"Error during image analysis: {e}"
 
 def audio_file_info(audio_path: str) -> str:
     """Enhanced audio processing with transcription"""
