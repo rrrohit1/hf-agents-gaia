@@ -192,8 +192,8 @@ def select_tools(state: AgentState) -> AgentState:
         selected_tools.append("youtube")
 
     # Information-based tool selection
-    current_indicators = ["latest", "recent", "current", "news", "today", "2024", "2025", "now"]
-    encyclopedia_indicators = ["history", "definition", "biography", "overview", "background"]
+    current_indicators = ["recent", "current", "news", "today", "2025", "now"]
+    encyclopedia_indicators = ["wiki", "wikipedia"]
     
     if any(indicator in question for indicator in current_indicators):
         selected_tools.append("search")
@@ -245,7 +245,9 @@ def execute_tools(state: AgentState) -> AgentState:
                 elif tool_name == "image":
                     result = AVAILABLE_TOOLS["image"].run({"image_path": file_path, "question": state["question"], "llm": llm})
                 elif tool_name == "youtube":
-                    result = AVAILABLE_TOOLS["youtube"].run({"file_path": file_path, "question": state["question"]})
+                    # print(f"Running YouTube tool with file path: {file_path}")
+                    # result = AVAILABLE_TOOLS["youtube"].run(state["question"])
+                    result = "AUDIO/VIDEO TOOL NOT IMPLEMENTED"
                 else:
                     result = AVAILABLE_TOOLS[tool_name].run(file_path)
             # Information-based tools
@@ -258,7 +260,9 @@ def execute_tools(state: AgentState) -> AgentState:
                 result = AVAILABLE_TOOLS[tool_name].run(clean_query)
 
             results[tool_name] = result
-            print(f"Tool {tool_name} completed successfully")
+
+            print(f"Tool {tool_name} completed successfully.")
+            print(f"Output for {tool_name}: {result}")
             
         except Exception as e:
             error_msg = f"Error using {tool_name}: {str(e)}"
@@ -280,27 +284,45 @@ def synthesize_answer(state: AgentState) -> AgentState:
     # Enhanced synthesis prompt
     tool_results_str = "\n".join([f"=== {tool.upper()} RESULTS ===\n{result}\n" for tool, result in state["tool_results"].items()])
 
-    synthesis_prompt = f"""You are a precise assistant tasked with answering the user's question using available tool outputs.
+    cot_prompt = f"""You are a precise assistant tasked with analyzing the user's question using the available tool outputs.
 
     Question:
     {state["question"]}
 
-    Available information:
+    Available tool outputs (from text, tables, audio, video, or images):
     {tool_results_str}
 
     Instructions:
-    - Think step-by-step using information from the tool results and the question itself.
-    - If the answer is directly stated, extract it.
-    - If not, reason internally to derive the answer using facts, dates, or counts present in the data.
-    - Only use factual logic. Do not invent or assume anything not supported by the tools or question.
-    - If no answer can be found or inferred, return "NA".
-    - Output only the final answer — no reasoning, no explanation.
-    - Do not add any leading/trailing spaces or punctuation unless explicitly required by the question.
+    - Carefully analyze the question and each tool output to determine a strategy to find the answer.
+    - Break down your reasoning step-by-step using only the facts available in the outputs.
+    - Consider any decoding, logical reasoning, counting, or interpretation required.
+    - For audio, image, or video content, rely only on the transcriptions or structured descriptions provided.
+    - Do not guess. If information is insufficient, note that clearly.
+    - Conclude your response with a clearly marked line: `---END OF ANALYSIS---`
+
+    Your step-by-step analysis:"""
+
+    cot_response = llm.invoke(cot_prompt).content
+
+    final_answer_prompt = f"""You are a precise assistant tasked with deriving the final answer from the step-by-step analysis below.
+
+    Question:
+    {state["question"]}
+
+    Step-by-step analysis:
+    {cot_response}
+
+    Instructions:
+    - Carefully read the question and the full analysis above carefully.
+    - Output **only** the final answer — no reasoning, explanation, or formatting.
+    - If the analysis concludes that a definitive answer cannot be determined, respond with "NA".
+    - The answer should be concise and directly address the question.
 
     Final answer:"""
+
         
     try:
-        response = llm.invoke(synthesis_prompt).content
+        response = llm.invoke(final_answer_prompt).content
         state["final_answer"] = response
         state["current_step"] = AgentStep.COMPLETE.value
     except Exception as e:

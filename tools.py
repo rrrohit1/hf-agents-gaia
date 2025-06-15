@@ -10,7 +10,7 @@ from typing import List, Dict, Optional, Union
 from tabulate import tabulate
 import whisper
 
-
+import numpy as np
 
 # ----------- Enhanced Search Functionality -----------
 class EnhancedSearchTool:
@@ -385,13 +385,12 @@ def code_file_read(code_path: str) -> str:
 import yt_dlp
 from pathlib import Path
 
-def extract_youtube_info(file_path: str, question: str) -> str:
+def extract_youtube_info(question: str) -> str:
     """
     Download a YouTube video or audio using yt-dlp without merging.
 
     Parameters:
     - url: str — YouTube URL
-    - file_path: str — full output path including filename
     - audio_only: bool — if True, downloads audio only; else best single video+audio stream
 
     Returns:
@@ -401,10 +400,7 @@ def extract_youtube_info(file_path: str, question: str) -> str:
     match = re.search(pattern, question)
     youtube_url =  match.group(1) if match else None
     
-    if file_path is None:
-        file_path = Path("youtube_video.mp4")  # Default output path if not provided
-    if not file_path.endswith('.mp4'):
-        file_path = str(file_path) + ".mp4"
+    file_path = Path("youtube_video.mp4")  # Default output path if not provided
 
     output_dir = Path(file_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)
