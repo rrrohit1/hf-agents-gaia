@@ -342,34 +342,11 @@ def image_file_info(image_path: str, question: str, llm) -> str:
         return f"Error during image analysis: {e}"
 
 def audio_file_info(audio_path: str) -> str:
-    """Enhanced audio processing with transcription"""
+    """Returns only the transcription of an audio file."""
     try:
-        info = f"AUDIO FILE ANALYSIS:\n"
-        info += f"File: {Path(audio_path).name}\n"
-        
-        # File size
-        file_size = Path(audio_path).stat().st_size
-        info += f"File size: {file_size:,} bytes ({file_size/1024/1024:.1f} MB)\n"
-        
-        # Transcription
-        model = whisper.load_model("base")  # Using base model for better speed/accuracy balance
+        model = whisper.load_model("turbo")  # Fast + accurate balance
         result = model.transcribe(audio_path, fp16=False)
-        
-        info += f"Duration: {result.get('duration', 'Unknown')} seconds\n"
-        info += f"Language detected: {result.get('language', 'Unknown')}\n"
-        info += f"\nTRANSCRIPTION:\n{result['text']}\n"
-        
-        # Add segments if available (for longer files)
-        if 'segments' in result and len(result['segments']) > 1:
-            info += f"\nTIMESTAMPED SEGMENTS:\n"
-            for i, segment in enumerate(result['segments'][:5]):  # First 5 segments
-                start_time = segment.get('start', 0)
-                end_time = segment.get('end', 0)
-                text = segment.get('text', '').strip()
-                info += f"[{start_time:.1f}s - {end_time:.1f}s]: {text}\n"
-        
-        return info
-        
+        return result['text']
     except Exception as e:
         return f"Error transcribing audio: {str(e)}"
 

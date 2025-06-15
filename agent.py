@@ -135,8 +135,8 @@ def analyze_question(state: AgentState) -> AgentState:
     1. excel - Enhanced Excel/CSV analysis with statistics and metadata
     2. search - Enhanced web search with intelligent query processing and result filtering
     3. wikipedia - Enhanced Wikipedia search with entity extraction and content filtering
-    4. image - Enhanced image analysis with detailed metadata
-    5. audio - Enhanced audio processing with transcription and language detection
+    4. image - Enhanced image analysis with what the image contains
+    5. audio - Enhanced audio processing with transcription
     6. code - Enhanced code analysis with language-specific insights
     
     Consider:
