@@ -380,3 +380,45 @@ def code_file_read(code_path: str) -> str:
         
     except Exception as e:
         return f"Error reading code file: {e}"
+    
+    
+import yt_dlp
+from pathlib import Path
+
+def extract_youtube_info(file_path: str, question: str) -> str:
+    """
+    Download a YouTube video or audio using yt-dlp without merging.
+
+    Parameters:
+    - url: str — YouTube URL
+    - file_path: str — full output path including filename
+    - audio_only: bool — if True, downloads audio only; else best single video+audio stream
+
+    Returns:
+    - str: path to downloaded file or error message
+    """
+    pattern = r"(https?://(?:www\.)?(?:youtube\.com/watch\?v=[\w\-]+|youtu\.be/[\w\-]+))"
+    match = re.search(pattern, question)
+    youtube_url =  match.group(1) if match else None
+    
+    if file_path is None:
+        file_path = Path("youtube_video.mp4")  # Default output path if not provided
+    if not file_path.endswith('.mp4'):
+        file_path = str(file_path) + ".mp4"
+
+    output_dir = Path(file_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    ydl_opts = {
+        'format': 'best[ext=mp4]/best',  # best mp4 combined stream or fallback to best available
+        'outtmpl': str(file_path),
+        'quiet': True,
+        'no_warnings': True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([youtube_url])
+        return audio_file_info(str(file_path))
+    except Exception as e:
+        return f"Error: {e}"

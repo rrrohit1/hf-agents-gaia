@@ -20,7 +20,8 @@ from tools import (
     excel_to_markdown,
     image_file_info,
     audio_file_info,
-    code_file_read)
+    code_file_read,
+    extract_youtube_info)
 
 # Load environment variables
 load_dotenv()
@@ -114,6 +115,12 @@ code_tool = LangTool.from_function(
     description="Enhanced code file analysis with language-specific insights and structure analysis."
 )
 
+youtube_tool = LangTool.from_function(
+    name="extract_youtube_info",
+    func=extract_youtube_info,
+    description="Extracts transcription from the youtube link"
+)
+
 # Enhanced tool registry
 AVAILABLE_TOOLS = {
     "excel": excel_tool,
@@ -122,6 +129,7 @@ AVAILABLE_TOOLS = {
     "image": image_tool,
     "audio": audio_tool,
     "code": code_tool,
+    "youtube": youtube_tool
 }
 
 # ----------- Intelligent Tool Selection -----------
@@ -138,6 +146,7 @@ def analyze_question(state: AgentState) -> AgentState:
     4. image - Enhanced image analysis with what the image contains
     5. audio - Enhanced audio processing with transcription
     6. code - Enhanced code analysis with language-specific insights
+    7. youtube - Extracts transcription from the youtube link
     
     Consider:
     - Question type (factual, analytical, current events, technical)
@@ -179,6 +188,8 @@ def select_tools(state: AgentState) -> AgentState:
         selected_tools.append("audio")
     if any(keyword in question for keyword in [".py", ".ipynb", "code", "script", "function"]):
         selected_tools.append("code")
+    if any(keyword in question for keyword in ["youtube"]):
+        selected_tools.append("youtube")
 
     # Information-based tool selection
     current_indicators = ["latest", "recent", "current", "news", "today", "2024", "2025", "now"]
@@ -233,6 +244,8 @@ def execute_tools(state: AgentState) -> AgentState:
                     result = AVAILABLE_TOOLS["excel"].run({"excel_path": file_path, "sheet_name": None})
                 elif tool_name == "image":
                     result = AVAILABLE_TOOLS["image"].run({"image_path": file_path, "question": state["question"], "llm": llm})
+                elif tool_name == "youtube":
+                    result = AVAILABLE_TOOLS["youtube"].run({"file_path": file_path, "question": state["question"]})
                 else:
                     result = AVAILABLE_TOOLS[tool_name].run(file_path)
             # Information-based tools
