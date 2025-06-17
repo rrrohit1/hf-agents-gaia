@@ -5,6 +5,7 @@ from typing import Optional, Union, Dict, List, Any
 from enum import Enum
 import requests
 import tempfile
+import ast
 
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
@@ -13,6 +14,7 @@ from langchain_core.runnables import RunnableLambda
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pathlib import Path
 
+from langchain.tools import StructuredTool
 
 from tools import (
     EnhancedSearchTool,
@@ -91,13 +93,13 @@ enhanced_wiki_tool = LangTool.from_function(
     description="Enhanced Wikipedia search with entity extraction, multi-term search, and relevant content filtering. Provides detailed encyclopedic information."
 )
 
-excel_tool = LangTool.from_function(
+excel_tool = StructuredTool.from_function(
     name="excel_to_text",
     func=excel_to_markdown,
     description="Enhanced Excel analysis with metadata, statistics, and structured data preview. Inputs: 'excel_path' (str), 'sheet_name' (str, optional).",
 )
 
-image_tool = LangTool.from_function(
+image_tool = StructuredTool.from_function(
     name="image_file_info",
     func=image_file_info,
     description="Enhanced image file analysis with detailed metadata and properties."
@@ -191,26 +193,88 @@ def select_tools(state: AgentState) -> AgentState:
     if any(keyword in question for keyword in ["youtube"]):
         selected_tools.append("youtube")
 
-    # Information-based tool selection
-    current_indicators = ["recent", "current", "news", "today", "2025", "now"]
-    encyclopedia_indicators = ["wiki", "wikipedia"]
+    print(f"File-based tools selected: {selected_tools}")
+
+    tools_prompt = f"""
+    You are a smart assistant that selects relevant tools based on the user's natural language question.
+
+    Available tools:
+    - "search" → Use for real-time, recent, or broad web information.
+    - "wikipedia" → Use for factual or encyclopedic knowledge.
+    - "excel" → Use for spreadsheet-related questions (.xlsx, .csv).
+    - "image" → Use for image files (.png, .jpg, etc.) or image-based tasks.
+    - "audio" → Use for sound files (.mp3, .wav, etc.) or transcription.
+    - "code" → Use for programming-related questions or when files like .py are mentioned.
+    - "youtube" → Use for questions involving YouTube videos.
+
+    Return the result as a **Python list of strings**, no explanation. Use only the relevant tools.
+    If not relevant tool is found, return an empty list such as [].
+
+    ### Examples:
+
+    Q: "Show me recent news about elections in 2025"
+    A: ["search"]
+
+    Q: "Summarize this Wikipedia article about Einstein"
+    A: ["wikipedia"]
+
+    Q: "Analyze this .csv file"
+    A: ["excel"]
+
+    Q: "Transcribe this .wav audio file"
+    A: ["audio"]
+
+    Q: "Generate Python code from this prompt"
+    A: ["code"]
+
+    Q: "Who was the president of USA in 1945?"
+    A: ["wikipedia"]
+
+    Q: "Give me current weather updates"
+    A: ["search"]
+
+    Q: "Look up the history of space exploration"
+    A: ["search", "wikipedia"]
+
+    Q: "What is 2 + 2?"
+    A: []
+
+    ### Now answer:
+
+    Q: {state["question"]}
+    A:
+    """
     
-    if any(indicator in question for indicator in current_indicators):
-        selected_tools.append("search")
-    elif any(indicator in question for indicator in encyclopedia_indicators):
-        selected_tools.append("wikipedia")
-    elif any(keyword in question for keyword in ["search", "find", "look up", "information about"]):
-        # Use both for comprehensive coverage
-        selected_tools.extend(["search", "wikipedia"])
+    llm_tools = ast.literal_eval(llm.invoke(tools_prompt).content.strip())
+    if not isinstance(llm_tools, list):
+        llm_tools = []
+    print(f"LLM suggested tools: {llm_tools}")
+    selected_tools.extend(llm_tools)
+    selected_tools = list(set(selected_tools))  # Remove duplicates
 
-    # Default fallback
-    if not selected_tools:
-        if any(word in question for word in ["who", "what", "when", "where"]):
-            selected_tools.append("wikipedia")
-        selected_tools.append("search")
+    print(f"Final selected tools after LLM suggestion: {selected_tools}")
 
-    # Remove duplicates while preserving order
-    selected_tools = list(dict.fromkeys(selected_tools))
+
+    # # Information-based tool selection
+    # current_indicators = ["recent", "current", "news", "today", "2025", "now"]
+    # encyclopedia_indicators = ["wiki", "wikipedia"]
+    
+    # if any(indicator in question for indicator in current_indicators):
+    #     selected_tools.append("search")
+    # elif any(indicator in question for indicator in encyclopedia_indicators):
+    #     selected_tools.append("wikipedia")
+    # elif any(keyword in question for keyword in ["search", "find", "look up", "information about"]):
+    #     # Use both for comprehensive coverage
+    #     selected_tools.extend(["search", "wikipedia"])
+
+    # # Default fallback
+    # if not selected_tools:
+    #     if any(word in question for word in ["who", "what", "when", "where"]):
+    #         selected_tools.append("wikipedia")
+    #         selected_tools.append("search")
+
+    # # Remove duplicates while preserving order
+    # selected_tools = list(dict.fromkeys(selected_tools))
     
     state["selected_tools"] = selected_tools
     state["current_step"] = AgentStep.EXECUTE_TOOLS.value
@@ -276,31 +340,46 @@ def execute_tools(state: AgentState) -> AgentState:
 
 def synthesize_answer(state: AgentState) -> AgentState:
     """Enhanced answer synthesis with better formatting"""
+
+
     if not state["tool_results"]:
-        state["final_answer"] = "I couldn't find any relevant information to answer your question."
-        state["current_step"] = AgentStep.COMPLETE.value
-        return state
+        # If no tools were executed, use only the question for analysis
+        cot_prompt = f"""You are a precise assistant tasked with analyzing the user's question.
+
+        Question:
+        {state["question"]}
+
+        Instructions:
+        - Carefully analyze the question to determine a strategy to find the answer.
+        - Break down your reasoning step-by-step.
+        - Consider any decoding, logical reasoning, counting, or interpretation required.
+        - Do not guess. If information is insufficient, note that clearly.
+        - Conclude your response with a clearly marked line: `---END OF ANALYSIS---`
+
+        Your step-by-step analysis:"""
+
+    else:
     
-    # Enhanced synthesis prompt
-    tool_results_str = "\n".join([f"=== {tool.upper()} RESULTS ===\n{result}\n" for tool, result in state["tool_results"].items()])
+        # Enhanced synthesis prompt
+        tool_results_str = "\n".join([f"=== {tool.upper()} RESULTS ===\n{result}\n" for tool, result in state["tool_results"].items()])
 
-    cot_prompt = f"""You are a precise assistant tasked with analyzing the user's question using the available tool outputs.
+        cot_prompt = f"""You are a precise assistant tasked with analyzing the user's question using the available tool outputs.
 
-    Question:
-    {state["question"]}
+        Question:
+        {state["question"]}
 
-    Available tool outputs (from text, tables, audio, video, or images):
-    {tool_results_str}
+        Available tool outputs (from text, tables, audio, video, or images):
+        {tool_results_str}
 
-    Instructions:
-    - Carefully analyze the question and each tool output to determine a strategy to find the answer.
-    - Break down your reasoning step-by-step using only the facts available in the outputs.
-    - Consider any decoding, logical reasoning, counting, or interpretation required.
-    - For audio, image, or video content, rely only on the transcriptions or structured descriptions provided.
-    - Do not guess. If information is insufficient, note that clearly.
-    - Conclude your response with a clearly marked line: `---END OF ANALYSIS---`
+        Instructions:
+        - Carefully analyze the question and each tool output to determine a strategy to find the answer.
+        - Break down your reasoning step-by-step using only the facts available in the outputs.
+        - Consider any decoding, logical reasoning, counting, or interpretation required.
+        - For audio, image, or video content, rely only on the transcriptions or structured descriptions provided.
+        - Do not guess. If information is insufficient, note that clearly.
+        - Conclude your response with a clearly marked line: `---END OF ANALYSIS---`
 
-    Your step-by-step analysis:"""
+        Your step-by-step analysis:"""
 
     cot_response = llm.invoke(cot_prompt).content
 

@@ -285,9 +285,11 @@ class EnhancedWikipediaTool:
             return f"Enhanced Wikipedia error: {str(e)}"
 
 # ----------- Enhanced File Processing Tools -----------
-def excel_to_markdown(excel_path: str, sheet_name: Optional[str] = None) -> str:
+def excel_to_markdown(inputs: dict) -> str:
     """Enhanced Excel tool with better error handling and data analysis"""
     try:
+        excel_path = inputs["excel_path"]
+        sheet_name = inputs.get("sheet_name", None)
         file_path = Path(excel_path).expanduser().resolve()
         if not file_path.is_file():
             return f"Error: Excel file not found at {file_path}"
