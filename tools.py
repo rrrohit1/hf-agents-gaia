@@ -11,6 +11,7 @@ from tabulate import tabulate
 import whisper
 
 import numpy as np
+import os
 
 # ----------- Enhanced Search Functionality -----------
 class EnhancedSearchTool:
@@ -327,18 +328,26 @@ def excel_to_markdown(inputs: dict) -> str:
     except Exception as e:
         return f"Error reading Excel file: {str(e)}"
 
-def image_file_info(image_path: str, question: str, llm) -> str:
+def image_file_info(image_path: str, question: str) -> str:
+    """Enhanced image file analysis using Gemini API"""
     try:
-        with open(image_path, "rb") as img_file:
-            image_data = img_file.read()
+        from google import genai
+        from google.genai.types import  Part
 
-        inputs = [
-            question,
-            {"mime_type": "image/jpeg", "data": image_data}
-        ]
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-        response = llm.invoke(inputs)
-        return response.content.strip()
+        # Read content from a local file
+        with open(image_path, "rb") as f:
+            img_bytes = f.read()
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-preview-05-20",
+            contents=[
+                question,
+                Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
+            ],
+        )
+        return response.text
     
     except Exception as e:
         return f"Error during image analysis: {e}"
@@ -346,7 +355,7 @@ def image_file_info(image_path: str, question: str, llm) -> str:
 def audio_file_info(audio_path: str) -> str:
     """Returns only the transcription of an audio file."""
     try:
-        model = whisper.load_model("turbo")  # Fast + accurate balance
+        model = whisper.load_model("tiny")  # Fast + accurate balance
         result = model.transcribe(audio_path, fp16=False)
         return result['text']
     except Exception as e:
@@ -401,8 +410,11 @@ def extract_youtube_info(question: str) -> str:
     pattern = r"(https?://(?:www\.)?(?:youtube\.com/watch\?v=[\w\-]+|youtu\.be/[\w\-]+))"
     match = re.search(pattern, question)
     youtube_url =  match.group(1) if match else None
+    print(f"Extracting YouTube URL: {youtube_url}")
     
-    file_path = Path("youtube_video.mp4")  # Default output path if not provided
+    match = re.search(r"(?:v=|\/)([a-zA-Z0-9_-]{11})", youtube_url)
+    video_id = match.group(1) if match else "dummy_id"
+    file_path = Path(video_id)
 
     output_dir = Path(file_path).parent
     output_dir.mkdir(parents=True, exist_ok=True)

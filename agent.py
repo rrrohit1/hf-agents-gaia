@@ -78,6 +78,12 @@ def initialize_state(question: str) -> AgentState:
         "max_errors": 3
     }
 
+# Initialize vanilla tools
+from langchain.tools import DuckDuckGoSearchResults, WikipediaQueryRun
+from langchain.utilities import WikipediaAPIWrapper
+
+duckduckgo_tool = DuckDuckGoSearchResults()
+wiki_tool = WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())
 
 
 # Initialize enhanced tools
@@ -126,8 +132,8 @@ youtube_tool = LangTool.from_function(
 # Enhanced tool registry
 AVAILABLE_TOOLS = {
     "excel": excel_tool,
-    "search": enhanced_search_tool,
-    "wikipedia": enhanced_wiki_tool,
+    "search": wiki_tool,
+    "wikipedia": duckduckgo_tool,
     "image": image_tool,
     "audio": audio_tool,
     "code": code_tool,
@@ -307,11 +313,10 @@ def execute_tools(state: AgentState) -> AgentState:
                 if tool_name == "excel":
                     result = AVAILABLE_TOOLS["excel"].run({"excel_path": file_path, "sheet_name": None})
                 elif tool_name == "image":
-                    result = AVAILABLE_TOOLS["image"].run({"image_path": file_path, "question": state["question"], "llm": llm})
+                    result = AVAILABLE_TOOLS["image"].run({"image_path": file_path, "question": state["question"]})
                 elif tool_name == "youtube":
-                    # print(f"Running YouTube tool with file path: {file_path}")
-                    # result = AVAILABLE_TOOLS["youtube"].run(state["question"])
-                    result = "AUDIO/VIDEO TOOL NOT IMPLEMENTED"
+                    print(f"Running YouTube tool with file path: {file_path}")
+                    result = AVAILABLE_TOOLS["youtube"].run(state["question"])
                 else:
                     result = AVAILABLE_TOOLS[tool_name].run(file_path)
             # Information-based tools
@@ -341,49 +346,28 @@ def execute_tools(state: AgentState) -> AgentState:
 def synthesize_answer(state: AgentState) -> AgentState:
     """Enhanced answer synthesis with better formatting"""
 
+    tool_results_str = "\n".join([f"=== {tool.upper()} RESULTS ===\n{result}\n" for tool, result in state["tool_results"].items()])
 
-    if not state["tool_results"]:
-        # If no tools were executed, use only the question for analysis
-        cot_prompt = f"""You are a precise assistant tasked with analyzing the user's question.
+    cot_prompt = f"""You are a precise assistant tasked with analyzing the user's question{" using the available tool outputs" if state["tool_results"] else ""}.
 
-        Question:
-        {state["question"]}
+    Question:
+    {state["question"]}
 
-        Instructions:
-        - Carefully analyze the question to determine a strategy to find the answer.
-        - Break down your reasoning step-by-step.
-        - Consider any decoding, logical reasoning, counting, or interpretation required.
-        - Do not guess. If information is insufficient, note that clearly.
-        - Conclude your response with a clearly marked line: `---END OF ANALYSIS---`
+    {f"Available tool outputs: {tool_results_str}" if state["tool_results"] else ""}
 
-        Your step-by-step analysis:"""
+    Instructions:
+    - Think step-by-step to determine the best strategy to answer the question.
+    - Use only the given information; do not hallucinate or infer from external knowledge.
+    - If decoding, logical deduction, counting, or interpretation is required, show each step clearly.
+    - If any part of the tool output is unclear or incomplete, mention it and its impact.
+    - Do not guess. If the information is insufficient, say so clearly.
+    - Finish with a clearly marked line: `---END OF ANALYSIS---`
 
-    else:
-    
-        # Enhanced synthesis prompt
-        tool_results_str = "\n".join([f"=== {tool.upper()} RESULTS ===\n{result}\n" for tool, result in state["tool_results"].items()])
-
-        cot_prompt = f"""You are a precise assistant tasked with analyzing the user's question using the available tool outputs.
-
-        Question:
-        {state["question"]}
-
-        Available tool outputs (from text, tables, audio, video, or images):
-        {tool_results_str}
-
-        Instructions:
-        - Carefully analyze the question and each tool output to determine a strategy to find the answer.
-        - Break down your reasoning step-by-step using only the facts available in the outputs.
-        - Consider any decoding, logical reasoning, counting, or interpretation required.
-        - For audio, image, or video content, rely only on the transcriptions or structured descriptions provided.
-        - Do not guess. If information is insufficient, note that clearly.
-        - Conclude your response with a clearly marked line: `---END OF ANALYSIS---`
-
-        Your step-by-step analysis:"""
+    Your step-by-step analysis:"""
 
     cot_response = llm.invoke(cot_prompt).content
 
-    final_answer_prompt = f"""You are a precise assistant tasked with deriving the final answer from the step-by-step analysis below.
+    final_answer_prompt = f"""You are a precise assistant tasked with deriving the **final answer** from the step-by-step analysis below.
 
     Question:
     {state["question"]}
@@ -392,10 +376,11 @@ def synthesize_answer(state: AgentState) -> AgentState:
     {cot_response}
 
     Instructions:
-    - Carefully read the question and the full analysis above carefully.
-    - Output **only** the final answer — no reasoning, explanation, or formatting.
-    - If the analysis concludes that a definitive answer cannot be determined, respond with "NA".
-    - The answer should be concise and directly address the question.
+    - Read the analysis thoroughly before responding.
+    - Output ONLY the final answer. Do NOT include any reasoning or explanation.
+    - Remove any punctuation at the corners of the answer unless it is explicitly mentioned in the question.
+    - The answer must be concise and factual.
+    - If the analysis concluded that a definitive answer cannot be determined, respond with: `NA` (exactly).
 
     Final answer:"""
 
