@@ -1,6 +1,6 @@
 gradio
 requests
-langgraph
+langchain
 openai-whisper
 google-generativeai
 python-dotenv
