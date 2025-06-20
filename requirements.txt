@@ -3,3 +3,6 @@ requests
 langgraph
 openai-whisper
 google-generativeai
+python-dotenv
+yt-dlp
+tabulate
