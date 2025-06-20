@@ -8,3 +8,20 @@ This repository contains my final project for the Hugging Face Agents Course. Th
 ## Acknowledgments
 
 This project builds upon the initial template provided by the [Hugging Face Agents Course Template](https://huggingface.co/spaces/agents-course/Final_Assignment_Template/tree/main) repository.
+
+
+---
+title: HF Agents: GAIA Benchmark
+emoji: 🕵🏻‍♂️
+colorFrom: indigo
+colorTo: indigo
+sdk: gradio
+sdk_version: 5.25.2
+app_file: app.py
+pinned: false
+hf_oauth: true
+# optional, default duration is 8 hours/480 minutes. Max duration is 30 days/43200 minutes.
+hf_oauth_expiration_minutes: 480
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
