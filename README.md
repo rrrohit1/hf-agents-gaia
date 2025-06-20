@@ -1,5 +1,5 @@
 ---
-title: HF Agents: GAIA Benchmark
+title: HF Agents GAIA Benchmark
 emoji: 🕵🏻‍♂️
 colorFrom: indigo
 colorTo: indigo
