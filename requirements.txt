@@ -9,3 +9,6 @@ tabulate
 langchain-community
 langgraph
 langchain-google-genai
+duckduckgo-search
+wikipedia
+Pillow
